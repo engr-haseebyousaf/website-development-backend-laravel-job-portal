@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Job;
 use App\Models\JobsApplied;
 use App\Models\JobType;
+use App\Models\SavedJob;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -75,8 +76,10 @@ class JobController extends Controller
         return view('front.jobs.my-jobs', compact(['jobs']));
     }
     public function editJob($id){
-        $job = Job::where("user_id", Auth::user()->id)->find($id);
-        if ($job == null) {
+        $job = Job::where([
+            'id' => $id
+        ])->find($id);
+        if ($job === null) {
             abort(404);
         }
         $categories = Category::orderBy('name')->where('status', 1)->get();
@@ -152,26 +155,26 @@ class JobController extends Controller
         $jobs = Job::where([
             "status" => 1,
         ]);
-        if (!empty($request->keywords)) {
+        if ($request->filled("keywords")) {
             $jobs = $jobs->where(function($query) use ($request){
-                $query->orWhere("keywords", "like", "%" . $request->keywords . "%");
-                $query->orWhere("title","like", "%" . $request->title . "%");
+                $query->orWhere("keywords", "like", "%" . $request->keywords . "%")
+                ->orWhere("title","like", "%" . $request->title . "%");
             });
         }
-        if (!empty($request->location)) {
+        if ($request->filled('location')) {
             $jobs = $jobs->where(function($query) use ($request){
-                $query->orWhere("location", "like", "%" . $request->location . "%");
-                $query->orWhere("company_location","like", "%" . $request->location . "%");
+                $query->orWhere("location", "like", "%" . $request->location . "%")
+                ->orWhere("company_location","like", "%" . $request->location . "%");
             });
         }
-        if (!empty($request->category)){
+        if ($request->filled('category')){
             $jobs = $jobs->where("category_id", $request->category);
         }
-        if (!empty($request->experiance)){
+        if ($request->filled('experiance')){
             $jobs = $jobs->where("experiance", $request->experiance);
         }
         $jobTypeArr = [];
-        if (!empty($request->jobType)) {
+        if ($request->filled('jobType')) {
             $jobTypeArr = explode(",", $request->jobType);
             // dd($jobTypeArr, $request->jobType);
             $jobs = $jobs->whereIn("job_type_id", $jobTypeArr);
@@ -187,17 +190,25 @@ class JobController extends Controller
         return view("front.jobs.jobs", compact("categories", "jobTypes", "jobs", "jobTypeArr"));
     }
     // show the job details view
-    public function jobDetails($id){
+    public function jobDetails(Request $request){
         $job = Job::where([
-            "id" => $id,
+            "id" => $request->id,
             "status" => 1,
         ])
         ->with(["jobType", "categories"])
-        ->find($id);
+        ->find($request->id);
         if ($job == null) {
             abort(404, "Job Not Found");
         }
-        return view("front.jobs.job-details", compact("job"));
+        $savedJob = SavedJob::where([
+            "user_id" => Auth::user()->id,
+            "job_id" => $request->id
+        ])->get()->count();
+
+        $jobApplications = AppliedJob::with("user")
+        ->get();
+        // dd($jobApplications);
+        return view("front.jobs.job-details", compact("job", "savedJob", "jobApplications"));
     }
 
     // apply job
@@ -261,6 +272,91 @@ class JobController extends Controller
     }
     // jobs applied page view
     public function jobsApplied() {
-        return view("front.jobs.jobs-applied");
+        $appliedJobs = AppliedJob::where('user_id', Auth::user()->id)->with(['job', 'job.jobType', 'job.applications'])->paginate(10);
+        // dd($appliedJobs);
+        return view("front.jobs.jobs-applied", compact('appliedJobs'));
+    }
+    public function jobApplicationDelete(Request $request) {
+        $jobApplication = AppliedJob::where([
+            'id'=> $request->id,
+            'user_id' => Auth::user()->id
+        ]);
+        if ($jobApplication == null) {
+            session()->flash('fail', "Job Application Not Found");
+            return response([
+                "status" => false,
+                'message' => "Job Application Not Found"
+            ]);
+        }
+        AppliedJob::where([
+            'id' => $request->id,
+            'user_id' => Auth::user()->id
+        ])->delete();
+        session()->flash('success', "Successfully Removed Job Application");
+        return response([
+            'status' => true,
+            "Successfully Removed Job Application"
+        ]);
+    }
+
+    public function saveJob(Request $request) {
+        // dd($request->id);
+        $job = Job::where("id", $request->id)->get();
+        if($job == null) {
+            session()->flash('fail', "Job Does Not Exist");
+            return response([
+                "status" => false
+            ]);
+        }
+        $count = SavedJob::where([
+            "job_id" => $request->id,
+            "user_id" => Auth::user()->id
+        ])->get();
+        if ($count->count() > 0) {
+            session()->flash('warn', "Job Already Saved");
+            return response([
+                "status" => false
+            ]);
+        }
+        $savedJob = new SavedJob();
+        $savedJob->user_id = Auth::user()->id;
+        $savedJob->job_id = $request->id;
+        $savedJob->save();
+        session()->flash('success', "Job Saved Successfully");
+            return response([
+                "status" => true
+            ]);
+    }
+
+    // saved jobs *******
+    public function savedJobs() {
+        $savedJobs = SavedJob::
+        where('user_id', Auth::user()->id)
+        ->with(['job', 'job.jobType', 'job.applications'])
+        ->paginate(10);
+        // dd($appliedJobs);
+        return view("front.jobs.saved-jobs", compact('savedJobs'));
+    }
+    public function unsaveJob(Request $request) {
+        $savedJob = SavedJob::where([
+            'id'=> $request->id,
+            'user_id' => Auth::user()->id
+        ]);
+        if ($savedJob == null) {
+            session()->flash('fail', "Job Not Saved");
+            return response([
+                "status" => false,
+                'message' => "Job Not Saved"
+            ]);
+        }
+        SavedJob::where([
+            'id' => $request->id,
+            'user_id' => Auth::user()->id
+        ])->delete();
+        session()->flash('success', "Job Un-Saved successfully");
+        return response([
+            'status' => true,
+            "Job Un-Saved successfully"
+        ]);
     }
 }

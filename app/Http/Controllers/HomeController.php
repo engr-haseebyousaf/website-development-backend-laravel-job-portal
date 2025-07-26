@@ -12,6 +12,7 @@ class HomeController extends Controller
     public function index()
     {
         $categories = Category::where('status', 1)->take(8)->get();
+        $allCategories = Category::where('status', 1)->get();
         $featuredJobs = Job::where(["isFeatured"=> 1, "user_id" => Auth::user()->id])
         ->with("jobType")
         ->orderByDesc('created_at')->
@@ -22,6 +23,6 @@ class HomeController extends Controller
         ->orderByDesc('created_at')->
         take(6)->
         get();
-        return view('front.home', compact('categories', "featuredJobs", "latestJobs"));
+        return view('front.home', compact('categories', "featuredJobs", "latestJobs", "allCategories"));
     }
 }
